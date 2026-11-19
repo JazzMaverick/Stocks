@@ -92,6 +92,11 @@ body.sorting .cell.sel{border:2px solid var(--ext);background:#1a1308}
 </div>
 <div id="st" hidden>
   <div class="eh"><span>資料來源設定</span><span style="flex:1"></span><button id="stok">完成</button></div>
+  <div class="sec">更新間隔（秒）</div>
+  <div class="seg" data-k="rf"><button data-v="3">3</button><button data-v="5">5</button><button data-v="10">10</button><button data-v="15">15</button><button data-v="30">30</button></div>
+  <div class="sec">保持螢幕常亮</div>
+  <div class="seg" data-k="wake"><button data-v="0">關</button><button data-v="1">開</button></div>
+  <div class="note">網頁在背景或螢幕關閉時，瀏覽器會暫停更新，這是無法繞過的限制。開啟常亮後螢幕不會熄滅，頁面維持在前景就能持續更新。為了加快速度，目前這一頁的 6 檔每次優先更新，換頁後立刻更新新的那一頁，其餘頁面在背景每四次更新一輪。</div>
   <div class="sec">美股來源</div>
   <div class="seg" data-k="src_us"><button data-v="yahoo">Yahoo</button><button data-v="alpaca">Alpaca</button></div>
   <div id="akeys">
@@ -117,7 +122,6 @@ const DEF={us:["NVDA","AAPL","MSFT","GOOGL","AMZN","META","TSLA","AVGO","AMD","T
 const NAMES={"2330":"台積電","2317":"鴻海","2454":"聯發科","2308":"台達電","2382":"廣達","3711":"日月光投控","2412":"中華電","2881":"富邦金","2882":"國泰金","2891":"中信金","2303":"聯電","3034":"聯詠","3231":"緯創","2379":"瑞昱","6669":"緯穎","2345":"智邦","3008":"大立光","0050":"元大台灣50"};
 const isTW=s=>/\.TWO?$/.test(s),disp=s=>s.replace(/\.TWO?$/,"");
 let mkt="us";try{if(localStorage.getItem("mkt")==="tw")mkt="tw"}catch(e){}
-const REFRESH_MS=15000;
 // Yahoo 不一定允許瀏覽器直連，失敗時依序改走下列 CORS 代理；可自行替換成你自己的代理。
 const ROUTES=[u=>u,u=>"https://corsproxy.io/?"+encodeURIComponent(u),u=>"https://api.allorigins.win/raw?url="+encodeURIComponent(u)];
 let route=0;
@@ -156,7 +160,8 @@ async function getJSON(url){
   for(let k=0;k<ROUTES.length;k++){
     const r=(route+k)%ROUTES.length;
     try{
-      const res=await fetch(ROUTES[r](url));
+      const ac=new AbortController(),tm=setTimeout(()=>ac.abort(),6000);let res;
+      try{res=await fetch(ROUTES[r](url),{signal:ac.signal})}finally{clearTimeout(tm)}
       if(!res.ok)continue;
       const j=await res.json();route=r;return j;
     }catch(e){}
@@ -238,12 +243,13 @@ async function fetchD(s){
 async function aGet(path){
   const k=lsGet("alp_k"),sec=lsGet("alp_s");
   if(!k||!sec)throw new Error("nokey");
-  const r=await fetch("https://data.alpaca.markets"+path,{headers:{"APCA-API-KEY-ID":k,"APCA-API-SECRET-KEY":sec}});
+  const ac=new AbortController(),tm=setTimeout(()=>ac.abort(),6000);let r;
+  try{r=await fetch("https://data.alpaca.markets"+path,{headers:{"APCA-API-KEY-ID":k,"APCA-API-SECRET-KEY":sec},signal:ac.signal})}finally{clearTimeout(tm)}
   if(!r.ok)throw new Error("http"+r.status);
   return r.json();
 }
 function snaps(){
-  if(!snapP||Date.now()-snapAt>8000){snapAt=Date.now();snapP=aGet(`/v2/stocks/snapshots?symbols=${syms.join(",")}&feed=iex`)}
+  if(!snapP||Date.now()-snapAt>2500){snapAt=Date.now();snapP=aGet(`/v2/stocks/snapshots?symbols=${syms.join(",")}&feed=iex`)}
   return snapP;
 }
 const etF=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hourCycle:"h23",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
@@ -289,7 +295,7 @@ async function fetchDA(s){
 
 // --- 證交所 MIS（只有快照，分時線由本機累積）---
 function misAll(){
-  if(!misP||Date.now()-misAt>8000){
+  if(!misP||Date.now()-misAt>2500){
     misAt=Date.now();
     const ex=syms.map(s=>(/\.TWO$/.test(s)?"otc_":"tse_")+disp(s).toLowerCase()+".tw").join("|");
     misP=getJSON(`https://mis.twse.com.tw/stock/api/getStockInfo.jsp?json=1&delay=0&ex_ch=${ex}|&_=${Date.now()}`);
@@ -318,14 +324,23 @@ async function fetchQM(s){
 }
 
 // --- 設定畫面 ---
+let wl=null;
+async function setWake(on){
+  lsSet("wake",on?"1":"0");
+  try{
+    if(on&&"wakeLock" in navigator){wl=await navigator.wakeLock.request("screen");wl.addEventListener("release",()=>{wl=null})}
+    else if(wl){await wl.release();wl=null}
+  }catch(e){}
+}
+function curVal(k){const v=lsGet(k);return k==="src_us"?SRC().us:k==="src_tw"?SRC().tw:k==="rf"?(v||"5"):(v||"0")}
 function paintSettings(){
   document.querySelectorAll("#st .seg").forEach(g=>{
-    const cur=g.dataset.k==="src_us"?SRC().us:SRC().tw;
+    const cur=curVal(g.dataset.k);
     g.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.v===cur));
   });
   $("akeys").style.display=SRC().us==="alpaca"?"":"none";
 }
-document.querySelectorAll("#st .seg button").forEach(b=>b.onclick=()=>{lsSet(b.parentNode.dataset.k,b.dataset.v);paintSettings()});
+document.querySelectorAll("#st .seg button").forEach(b=>b.onclick=()=>{lsSet(b.parentNode.dataset.k,b.dataset.v);if(b.parentNode.dataset.k==="wake")setWake(b.dataset.v==="1");paintSettings()});
 $("ak").oninput=e=>lsSet("alp_k",e.target.value.trim());
 $("as").oninput=e=>lsSet("alp_s",e.target.value.trim());
 $("cfg").onclick=()=>{$("ak").value=lsGet("alp_k");$("as").value=lsGet("alp_s");paintSettings();$("st").hidden=false};
@@ -338,22 +353,42 @@ $("stok").onclick=()=>{
 };
 
 let timer=null,busy=false,again=false;
-async function refresh(){
-  if(busy){again=true;return}busy=true;srcErr="";$("stat").textContent="更新中…";
+let cyc=0,bgBusy=false,lastPg=0,pgT=null;
+const curPage=()=>Math.round($("pager").scrollLeft/($("pager").clientWidth||1));
+async function pull(list){
   let ok=0;
-  await Promise.all(syms.map(async s=>{
+  await Promise.all(list.map(async s=>{
     const q=await fetchQ(s);
     if(q){quotes[s]=q;ok++;render(s)}
     else if(!quotes[s]&&cells[s]){cells[s].querySelector(".ses").textContent="無資料"}
   }));
-  const d=new Date();
-  $("stat").textContent=ok?`${ok}/${syms.length} · ${d.toLocaleTimeString("zh-TW",{hour12:false,hour:"2-digit",minute:"2-digit"})} · ${srcLabel()}`:(srcErr||"資料來源連線失敗");
+  return ok;
+}
+async function refresh(){
+  if(busy){again=true;return}busy=true;srcErr="";
+  const pg=curPage(),main=syms.slice(pg*6,pg*6+6);
+  if(fsSym&&!main.includes(fsSym))main.push(fsSym);
+  if(!Object.keys(quotes).length)$("stat").textContent="更新中…";
+  const ok=await pull(main);
+  const have=syms.filter(s=>quotes[s]).length;
+  $("stat").textContent=ok||have?`${have}/${syms.length} · ${new Date().toLocaleTimeString("zh-TW",{hour12:false,hour:"2-digit",minute:"2-digit",second:"2-digit"})} · ${srcLabel()}`:(srcErr||"資料來源連線失敗");
   busy=false;saveTk();
   if(fsSym)renderFS();
+  // 其他頁面在背景慢慢補，不拖慢目前這一頁
+  const rest=syms.filter(s=>!main.includes(s));
+  if((cyc++%4===0||(cyc<4&&rest.some(s=>!quotes[s])))&&!bgBusy){
+    bgBusy=true;pull(rest).finally(()=>{bgBusy=false;saveTk()});
+  }
   if(again){again=false;refresh()}
 }
-function start(){clearInterval(timer);refresh();timer=setInterval(()=>{if(!document.hidden)refresh()},REFRESH_MS)}
-document.addEventListener("visibilitychange",()=>{if(!document.hidden)refresh()});
+// 換頁後立刻優先更新新的那一頁
+$("pager").addEventListener("scroll",()=>{
+  clearTimeout(pgT);
+  pgT=setTimeout(()=>{const p=curPage();if(p!==lastPg){lastPg=p;refresh()}},120);
+},{passive:true});
+const refreshMs=()=>(+lsGet("rf")||5)*1000;
+function start(){clearInterval(timer);cyc=0;refresh();timer=setInterval(()=>{if(!document.hidden)refresh()},refreshMs())}
+document.addEventListener("visibilitychange",()=>{if(!document.hidden){cyc=0;refresh();if(lsGet("wake")==="1"&&!wl)setWake(true)}});
 window.addEventListener("resize",()=>{syms.forEach(render);if(fsSym)renderFS()});
 
 const MAS=[[5,"#ffffff"],[10,"#ffd54f"],[20,"#4fc3f7"],[60,"#ba68c8"],[120,"#ff8a65"],[200,"#81c784"]];
@@ -523,6 +558,7 @@ function setMkt(m){
 document.querySelectorAll(".mk button").forEach(b=>b.onclick=()=>{if(b.dataset.m!==mkt)setMkt(b.dataset.m)});
 
 document.querySelectorAll(".mk button").forEach(b=>b.classList.toggle("on",b.dataset.m===mkt));
+if(lsGet("wake")==="1")setWake(true);
 build();start();
 </script>
 </body>
