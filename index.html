@@ -33,9 +33,6 @@ dialog::backdrop{background:rgba(0,0,0,.7)}
 textarea{width:100%;height:260px;background:#000;color:#fff;border:1px solid #444;border-radius:8px;padding:8px;font-size:15px;margin:10px 0}
 .row{display:flex;justify-content:space-between}
 [hidden]{display:none!important}
-#hint{font-size:12px;color:var(--ext);padding:0 12px 3px}
-body.sorting .cell{border:1px dashed #666;cursor:pointer}
-body.sorting .cell.sel{border:2px solid var(--ext);background:#1a1308}
 .cell{cursor:pointer}
 .mk button{color:var(--gray);font-size:16px;font-weight:700;padding:4px 6px}
 .mk button.on{color:#fff;box-shadow:inset 0 -2px 0 var(--ext)}
@@ -76,9 +73,8 @@ body.sorting .cell.sel{border:2px solid var(--ext);background:#1a1308}
 <body>
 <header>
   <span class="mk"><button data-m="us">美股</button><button data-m="tw">台股</button></span><span id="dots"></span><span id="stat"></span>
-  <button id="cfg">⚙</button><button id="sort">排序</button><button id="edit">編輯</button>
+  <button id="cfg">⚙</button><button id="edit">編輯</button>
 </header>
-<div id="hint" hidden>點一檔選取，再點另一檔即可互換位置；可左右滑動跨頁</div>
 <div id="pager"></div>
 <div id="fs" hidden>
   <div class="fh"><span id="fsym" class="sym"></span><span id="fses" class="ses"></span><button id="fsx">✕</button></div>
@@ -141,7 +137,7 @@ function build(){
     syms.slice(p*6,p*6+6).forEach(s=>{
       const c=document.createElement("div");c.className="cell";
       c.innerHTML=`<div class="top"><span class="sym">${disp(s)}</span><span class="ses gray">載入中…</span><span class="nm">${isTW(s)?(NAMES[disp(s)]||""):""}</span></div><div class="px">--</div><div class="chg">&nbsp;</div><canvas></canvas><div class="info">&nbsp;</div>`;
-      c.onclick=()=>tapCell(s);
+      c.onclick=()=>openFS(s);
       pg.appendChild(c);cells[s]=c;
       if(quotes[s])render(s);
     });
@@ -491,23 +487,6 @@ $("fcv").addEventListener("pointerdown",pickBar);
 $("fcv").addEventListener("pointermove",e=>{if(e.buttons)pickBar(e)});
 $("legend").onclick=()=>{fsIdx=null;renderFS()};
 
-let sorting=false,pick=null;
-function toggleSort(on){
-  sorting=on;pick=null;
-  document.body.classList.toggle("sorting",on);
-  $("sort").textContent=on?"完成":"排序";
-  $("hint").hidden=!on;
-  Object.values(cells).forEach(c=>c.classList.remove("sel"));
-}
-function tapCell(s){
-  if(!sorting){openFS(s);return}
-  if(pick===null){pick=s;cells[s].classList.add("sel");return}
-  if(pick===s){cells[s].classList.remove("sel");pick=null;return}
-  const a=syms.indexOf(pick),b=syms.indexOf(s);
-  [syms[a],syms[b]]=[syms[b],syms[a]];
-  save(syms);pick=null;build();
-}
-$("sort").onclick=()=>toggleSort(!sorting);
 
 function norm(t){t=t.toUpperCase().trim();return mkt==="tw"&&/^\d{4,6}[A-Z]?$/.test(t)?t+".TW":t}
 let edPick=null;
@@ -545,12 +524,11 @@ $("edreset").onclick=()=>fillEd(DEF[mkt]);
 $("edsave").onclick=()=>{
   const raw=[...$("edg").querySelectorAll("input")].map(i=>i.value).join(" ");
   const l=[...new Set(raw.split(/[,\s]+/).filter(Boolean).map(norm))].slice(0,18);
-  if(l.length){toggleSort(false);syms=l;save(l);Object.keys(cells).forEach(k=>delete cells[k]);build();start()}
+  if(l.length){syms=l;save(l);Object.keys(cells).forEach(k=>delete cells[k]);build();start()}
   $("ed").hidden=true;
 };
 function setMkt(m){
   mkt=m;try{localStorage.setItem("mkt",m)}catch(e){}
-  toggleSort(false);
   document.querySelectorAll(".mk button").forEach(b=>b.classList.toggle("on",b.dataset.m===m));
   syms=load(m);Object.keys(cells).forEach(k=>delete cells[k]);
   $("pager").scrollLeft=0;build();start();
