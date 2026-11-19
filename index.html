@@ -10,7 +10,7 @@
 *{box-sizing:border-box;margin:0}
 html,body{height:100%;background:#000;color:#fff;font-family:-apple-system,"Roboto","Noto Sans TC",sans-serif;overflow:hidden}
 body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
-header{display:flex;align-items:center;gap:8px;padding:4px 12px;font-size:16px;font-weight:700}
+header{display:flex;align-items:center;gap:4px;padding:4px 12px;font-size:16px;font-weight:700}
 #dots{display:flex;gap:5px}
 #dots i{width:6px;height:6px;border-radius:50%;background:#444}
 #dots i.on{background:#fff}
@@ -39,16 +39,25 @@ body.sorting .cell.sel{border:2px solid var(--ext);background:#1a1308}
 .cell{cursor:pointer}
 .mk button{color:var(--gray);font-size:16px;font-weight:700;padding:4px 6px}
 .mk button.on{color:#fff;box-shadow:inset 0 -2px 0 var(--ext)}
-#stat{white-space:nowrap;font-size:10px}
+#stat{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:right;white-space:nowrap;font-size:10px}
+#st{position:fixed;inset:0;z-index:30;background:#000;display:flex;flex-direction:column;gap:10px;overflow:auto;padding:calc(env(safe-area-inset-top) + 10px) 14px calc(env(safe-area-inset-bottom) + 14px)}
+#st .eh{display:flex;align-items:center;font-weight:700}
+#st .sec{font-weight:700;margin-top:6px}
+#st .seg{display:flex;gap:6px}
+#st .seg button{flex:1;border:1px solid #333;border-radius:10px;padding:10px;color:var(--gray);font-size:15px}
+#st .seg button.on{background:var(--ext);color:#000;border-color:var(--ext)}
+#st input{width:100%;background:#000;color:#fff;border:1px solid #444;border-radius:8px;padding:10px;font-size:15px;margin-bottom:6px}
+#st .note{font-size:12px;color:var(--gray);line-height:1.6}
 .nm{font-size:10px;color:var(--gray);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0}
 #ed{position:fixed;inset:0;z-index:20;background:#000;display:flex;flex-direction:column;padding:calc(env(safe-area-inset-top) + 6px) 10px calc(env(safe-area-inset-bottom) + 8px)}
 #ed .eh{display:flex;align-items:center;gap:6px;margin-bottom:4px;font-weight:700}
 #ed .eh button{font-size:15px}
 #edg{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(9,1fr);gap:6px}
-.ef{display:flex;align-items:center;gap:6px;border:1px solid #333;border-radius:8px;padding:0 8px;min-height:0}
-.ef b{font-size:11px;color:#000;border-radius:4px;min-width:20px;text-align:center;padding:1px 0}
+.ef{display:flex;align-items:center;border:1px solid #333;border-radius:8px;padding:0 8px 0 0;min-height:0;overflow:hidden}
+.ef.sel{border:2px solid var(--ext)}
+.ef b{align-self:stretch;display:flex;align-items:center;justify-content:center;min-width:44px;color:#000;font-weight:700;cursor:pointer;user-select:none}
 .p0 b{background:#ffb74d}.p1 b{background:#4fc3f7}.p2 b{background:#ba68c8}
-.ef input{flex:1;min-width:0;height:100%;background:none;border:0;color:#fff;font-size:16px;outline:0;text-transform:uppercase}
+.ef input{flex:1;min-width:0;height:100%;background:none;border:0;color:#fff;font-size:28px;font-weight:700;outline:0;text-transform:uppercase;padding:0 0 0 8px}
 #fs{position:fixed;inset:0;z-index:10;background:#000;display:flex;flex-direction:column;padding:calc(env(safe-area-inset-top) + 6px) 10px calc(env(safe-area-inset-bottom) + 6px)}
 #fs .fh{display:flex;align-items:center;gap:8px}
 #fs .sym{font-size:22px}
@@ -67,7 +76,7 @@ body.sorting .cell.sel{border:2px solid var(--ext);background:#1a1308}
 <body>
 <header>
   <span class="mk"><button data-m="us">美股</button><button data-m="tw">台股</button></span><span id="dots"></span><span id="stat"></span>
-  <button id="sort">排序</button><button id="edit">編輯</button>
+  <button id="cfg">⚙</button><button id="sort">排序</button><button id="edit">編輯</button>
 </header>
 <div id="hint" hidden>點一檔選取，再點另一檔即可互換位置；可左右滑動跨頁</div>
 <div id="pager"></div>
@@ -81,12 +90,25 @@ body.sorting .cell.sel{border:2px solid var(--ext);background:#1a1308}
   <div id="legend"></div>
   <canvas id="fcv"></canvas>
 </div>
+<div id="st" hidden>
+  <div class="eh"><span>資料來源設定</span><span style="flex:1"></span><button id="stok">完成</button></div>
+  <div class="sec">美股來源</div>
+  <div class="seg" data-k="src_us"><button data-v="yahoo">Yahoo</button><button data-v="alpaca">Alpaca</button></div>
+  <div id="akeys">
+    <input id="ak" placeholder="Alpaca Key ID" autocomplete="off" spellcheck="false">
+    <input id="as" type="password" placeholder="Alpaca Secret Key" autocomplete="off">
+    <div class="note">金鑰只存在這支手機的瀏覽器，只會直接送到 Alpaca，不經過任何代理。免費帳號用 IEX 資料，成交量只涵蓋部分市場，會和 Yahoo 不同。金鑰請到 Alpaca 後台申請（Paper 帳號即可）。</div>
+  </div>
+  <div class="sec">台股來源</div>
+  <div class="seg" data-k="src_tw"><button data-v="yahoo">Yahoo</button><button data-v="mis">證交所 MIS</button></div>
+  <div class="note">MIS 只提供即時快照，沒有分時歷史：分時線從你開啟頁面後才開始累積（同一天重開會保留），日K仍使用 Yahoo。MIS 可能被瀏覽器的 CORS 限制擋住，擋住時會自動改走公用代理。</div>
+</div>
 <div id="ed" hidden>
   <div class="eh"><span id="edt"></span><span style="flex:1"></span>
     <button id="edreset" style="color:var(--gray)">還原預設</button>
     <button id="edcancel" style="color:var(--gray)">取消</button>
     <button id="edsave">儲存</button></div>
-  <div class="gray" style="font-size:11px;margin-bottom:6px">同色編號為同一頁（每頁 6 檔）。台股輸入代號即可，上櫃請加 .TWO</div>
+  <div class="gray" style="font-size:11px;margin-bottom:6px">先點一個編號、再點另一個編號即可互換位置；同色為同一頁（每頁 6 檔）。台股輸入代號即可，上櫃請加 .TWO</div>
   <div id="edg"></div>
 </div>
 <script>
@@ -142,7 +164,7 @@ async function getJSON(url){
   return null;
 }
 
-async function fetchQ(s){
+async function fetchQY(s){
   const j=await getJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${s}?interval=2m&range=1d&includePrePost=${!isTW(s)}`);
   try{
     const r=j.chart.result[0],m=r.meta,tp=m.currentTradingPeriod;
@@ -192,9 +214,132 @@ function draw(cv,q,col){
   g.stroke();
 }
 
+
+// ===== 資料來源 =====
+let srcErr="",snapP=null,snapAt=0,misP=null,misAt=0,tk={};
+try{tk=JSON.parse(localStorage.getItem("tk")||"{}")}catch(e){}
+const lsGet=k=>{try{return localStorage.getItem(k)||""}catch(e){return ""}};
+const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
+const SRC=()=>({us:lsGet("src_us")==="alpaca"?"alpaca":"yahoo",tw:lsGet("src_tw")==="mis"?"mis":"yahoo"});
+const srcLabel=()=>{const S=SRC();return mkt==="tw"?(S.tw==="mis"?"MIS":"Yahoo"):(S.us==="alpaca"?"Alpaca":"Yahoo")};
+function saveTk(){try{localStorage.setItem("tk",JSON.stringify(tk))}catch(e){}}
+
+function fetchQ(s){const S=SRC();return isTW(s)?(S.tw==="mis"?fetchQM(s):fetchQY(s)):(S.us==="alpaca"?fetchQA(s):fetchQY(s))}
+async function fetchD(s){
+  const c=dcache[s];if(c&&Date.now()-c.at<300000)return c.d;
+  let d=null;
+  if(!isTW(s)&&SRC().us==="alpaca")d=await fetchDA(s);
+  if(!d)d=await fetchDY(s);
+  if(d)dcache[s]={d,at:Date.now()};
+  return d;
+}
+
+// --- Alpaca（金鑰只直連 data.alpaca.markets，不走代理）---
+async function aGet(path){
+  const k=lsGet("alp_k"),sec=lsGet("alp_s");
+  if(!k||!sec)throw new Error("nokey");
+  const r=await fetch("https://data.alpaca.markets"+path,{headers:{"APCA-API-KEY-ID":k,"APCA-API-SECRET-KEY":sec}});
+  if(!r.ok)throw new Error("http"+r.status);
+  return r.json();
+}
+function snaps(){
+  if(!snapP||Date.now()-snapAt>8000){snapAt=Date.now();snapP=aGet(`/v2/stocks/snapshots?symbols=${syms.join(",")}&feed=iex`)}
+  return snapP;
+}
+const etF=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hourCycle:"h23",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
+function etParts(ms){const o={};etF.formatToParts(ms).forEach(p=>o[p.type]=p.value);return o}
+const etDate=ts=>{const o=etParts(ts*1000);return o.year+"-"+o.month+"-"+o.day};
+function etTs(date,h,mi){
+  const[y,mo,d]=date.split("-").map(Number),g=Date.UTC(y,mo-1,d,h,mi),o=etParts(g);
+  const loc=Date.UTC(+o.year,+o.month-1,+o.day,+o.hour,+o.minute);
+  return(g-(loc-g))/1000;
+}
+async function fetchQA(s){
+  try{
+    const start=new Date(Date.now()-5*864e5).toISOString();
+    const[bj,sn]=await Promise.all([aGet(`/v2/stocks/${s}/bars?timeframe=5Min&start=${start}&limit=1000&feed=iex`),snaps()]);
+    const all=(bj.bars||[]).map(b=>({t:Date.parse(b.t)/1000,h:b.h,l:b.l,c:b.c,v:b.v||0}));
+    const x=(sn.snapshots||sn)[s],lt=x&&x.latestTrade;
+    if(!lt&&!all.length)return null;
+    const ref=lt?Date.parse(lt.t)/1000:all[all.length-1].t,date=etDate(ref);
+    const day=all.filter(b=>etDate(b.t)===date);
+    const reg0=etTs(date,9,30),reg1=etTs(date,16,0),pre0=etTs(date,4,0),post1=etTs(date,20,0);
+    const rb=day.filter(b=>b.t>=reg0&&b.t<reg1),hb=rb.length?rb:day;
+    const price=lt?lt.p:day[day.length-1].c;
+    const t=day.map(b=>b.t),c=day.map(b=>b.c);
+    if(!t.length||ref>t[t.length-1]){t.push(ref);c.push(price)}
+    const prev=(x&&x.prevDailyBar&&x.prevDailyBar.c)||c[0],now=Date.now()/1000;
+    const ses=now-ref>1200?"休市":ref<reg0?"盤前":ref<reg1?"盤中":"盤後";
+    return{price,prev,hi:hb.length?Math.max(...hb.map(b=>b.h)):price,lo:hb.length?Math.min(...hb.map(b=>b.l)):price,vol:hb.reduce((a,b)=>a+b.v,0),t,c,pre0,reg0,reg1,post1,ses,name:""};
+  }catch(e){srcErr=e.message==="nokey"?"請先到 ⚙ 設定 Alpaca 金鑰":"Alpaca 連線失敗（金鑰錯誤或被 CORS 擋住）";return null}
+}
+async function fetchDA(s){
+  try{
+    const start=new Date(Date.now()-740*864e5).toISOString(),end=new Date(Date.now()-16*60e3).toISOString();
+    let j;
+    try{j=await aGet(`/v2/stocks/${s}/bars?timeframe=1Day&start=${start}&end=${end}&limit=1000&adjustment=split&feed=sip`)}
+    catch(e){j=await aGet(`/v2/stocks/${s}/bars?timeframe=1Day&start=${start}&limit=1000&adjustment=split&feed=iex`)}
+    const bars=(j.bars||[]).map(b=>({t:Date.parse(b.t)/1000,o:b.o,h:b.h,l:b.l,c:b.c,v:b.v||0}));
+    if(!bars.length)return null;
+    const cs=bars.map(b=>b.c),ma={};
+    MAS.forEach(([n])=>{ma[n]=cs.map((_,i)=>i+1<n?null:cs.slice(i+1-n,i+1).reduce((a,b)=>a+b,0)/n)});
+    return{bars,ma};
+  }catch(e){return null}
+}
+
+// --- 證交所 MIS（只有快照，分時線由本機累積）---
+function misAll(){
+  if(!misP||Date.now()-misAt>8000){
+    misAt=Date.now();
+    const ex=syms.map(s=>(/\.TWO$/.test(s)?"otc_":"tse_")+disp(s).toLowerCase()+".tw").join("|");
+    misP=getJSON(`https://mis.twse.com.tw/stock/api/getStockInfo.jsp?json=1&delay=0&ex_ch=${ex}|&_=${Date.now()}`);
+  }
+  return misP;
+}
+async function fetchQM(s){
+  const j=await misAll(),it=j&&j.msgArray&&j.msgArray.find(m=>m.c===disp(s));
+  if(!it){srcErr="證交所 MIS 連線失敗或查無此代號";return null}
+  const num=v=>{const n=parseFloat(v);return isNaN(n)?null:n};
+  const prev=num(it.y);
+  let price=num(it.z);
+  if(price==null){
+    const b=num((it.b||"").split("_")[0]),a=num((it.a||"").split("_")[0]);
+    price=b!=null&&a!=null?(a+b)/2:(b!=null?b:(a!=null?a:prev));
+  }
+  if(price==null)return null;
+  const d=it.d,Y=+d.slice(0,4),M=+d.slice(4,6),D=+d.slice(6,8);
+  const reg0=Date.UTC(Y,M-1,D,1,0)/1000,reg1=Date.UTC(Y,M-1,D,5,30)/1000,now=Date.now()/1000;
+  const live=now>=reg0-300&&now<=reg1+300;
+  let o=tk[s];if(!o||o.d!==d)o=tk[s]={d,p:[]};
+  if(live){const last=o.p[o.p.length-1];if(!last||now-last[0]>=10)o.p.push([Math.min(now,reg1),price])}
+  const t=o.p.map(x=>x[0]),c=o.p.map(x=>x[1]);
+  if(!c.length){t.push(reg0);c.push(price)}
+  return{price,prev:prev==null?price:prev,hi:num(it.h)??price,lo:num(it.l)??price,vol:(num(it.v)||0)*1000,t,c,pre0:reg0,reg0,reg1,post1:reg1,ses:live?"盤中":"休市",name:it.n||""};
+}
+
+// --- 設定畫面 ---
+function paintSettings(){
+  document.querySelectorAll("#st .seg").forEach(g=>{
+    const cur=g.dataset.k==="src_us"?SRC().us:SRC().tw;
+    g.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.v===cur));
+  });
+  $("akeys").style.display=SRC().us==="alpaca"?"":"none";
+}
+document.querySelectorAll("#st .seg button").forEach(b=>b.onclick=()=>{lsSet(b.parentNode.dataset.k,b.dataset.v);paintSettings()});
+$("ak").oninput=e=>lsSet("alp_k",e.target.value.trim());
+$("as").oninput=e=>lsSet("alp_s",e.target.value.trim());
+$("cfg").onclick=()=>{$("ak").value=lsGet("alp_k");$("as").value=lsGet("alp_s");paintSettings();$("st").hidden=false};
+$("stok").onclick=()=>{
+  $("st").hidden=true;
+  Object.keys(quotes).forEach(k=>delete quotes[k]);
+  Object.keys(dcache).forEach(k=>delete dcache[k]);
+  snapP=null;misP=null;srcErr="";
+  start();
+};
+
 let timer=null,busy=false,again=false;
 async function refresh(){
-  if(busy){again=true;return}busy=true;$("stat").textContent="更新中…";
+  if(busy){again=true;return}busy=true;srcErr="";$("stat").textContent="更新中…";
   let ok=0;
   await Promise.all(syms.map(async s=>{
     const q=await fetchQ(s);
@@ -202,8 +347,8 @@ async function refresh(){
     else if(!quotes[s]&&cells[s]){cells[s].querySelector(".ses").textContent="無資料"}
   }));
   const d=new Date();
-  $("stat").textContent=ok?`${ok}/${syms.length} · ${d.toLocaleTimeString("zh-TW",{hour12:false})}`:"資料來源連線失敗";
-  busy=false;
+  $("stat").textContent=ok?`${ok}/${syms.length} · ${d.toLocaleTimeString("zh-TW",{hour12:false,hour:"2-digit",minute:"2-digit"})} · ${srcLabel()}`:(srcErr||"資料來源連線失敗");
+  busy=false;saveTk();
   if(fsSym)renderFS();
   if(again){again=false;refresh()}
 }
@@ -215,7 +360,7 @@ const MAS=[[5,"#ffffff"],[10,"#ffd54f"],[20,"#4fc3f7"],[60,"#ba68c8"],[120,"#ff8
 const dcache={};
 let fsSym=null,fsMode="intra",fsN=120,fsIdx=null;
 
-async function fetchD(s){
+async function fetchDY(s){
   const c=dcache[s];if(c&&Date.now()-c.at<300000)return c.d;
   const j=await getJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${s}?interval=1d&range=2y`);
   try{
@@ -330,16 +475,36 @@ function tapCell(s){
 $("sort").onclick=()=>toggleSort(!sorting);
 
 function norm(t){t=t.toUpperCase().trim();return mkt==="tw"&&/^\d{4,6}[A-Z]?$/.test(t)?t+".TW":t}
+let edPick=null;
+function fitEd(){
+  const rows=[...document.querySelectorAll("#edg .ef")];if(!rows.length)return;
+  const h=rows[0].clientHeight;
+  rows.forEach(r=>{
+    const inp=r.querySelector("input");
+    r.querySelector("b").style.fontSize=Math.floor(h*0.42)+"px";
+    const len=Math.max(4,inp.value.length);
+    inp.style.fontSize=Math.max(12,Math.floor(Math.min(h*0.64,inp.clientWidth/(len*0.66))))+"px";
+  });
+}
+window.addEventListener("resize",()=>{if(!$("ed").hidden)fitEd()});
 function fillEd(list){
-  const g=$("edg");g.innerHTML="";
+  const g=$("edg");g.innerHTML="";edPick=null;
   for(let i=0;i<18;i++){
-    const w=document.createElement("label");w.className="ef p"+Math.floor(i/6);
+    const w=document.createElement("div");w.className="ef p"+Math.floor(i/6);
     w.innerHTML=`<b>${i+1}</b><input autocapitalize="characters" autocomplete="off" spellcheck="false">`;
-    w.querySelector("input").value=list[i]?disp(list[i]):"";
+    const inp=w.querySelector("input");inp.value=list[i]?disp(list[i]):"";
+    inp.oninput=fitEd;
+    w.querySelector("b").onclick=()=>{
+      if(edPick===null){edPick=w;w.classList.add("sel");return}
+      if(edPick===w){w.classList.remove("sel");edPick=null;return}
+      const a=edPick.querySelector("input"),t=a.value;a.value=inp.value;inp.value=t;
+      edPick.classList.remove("sel");edPick=null;fitEd();
+    };
     g.appendChild(w);
   }
+  fitEd();
 }
-$("edit").onclick=()=>{fillEd(syms);$("edt").textContent="編輯"+(mkt==="us"?"美股":"台股")+"（18 檔）";$("ed").hidden=false};
+$("edit").onclick=()=>{$("ed").hidden=false;fillEd(syms);$("edt").textContent="編輯"+(mkt==="us"?"美股":"台股")+"（18 檔）";$("ed").hidden=false};
 $("edcancel").onclick=()=>{$("ed").hidden=true};
 $("edreset").onclick=()=>fillEd(DEF[mkt]);
 $("edsave").onclick=()=>{
