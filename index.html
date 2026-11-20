@@ -101,7 +101,7 @@ textarea{width:100%;height:260px;background:#000;color:#fff;border:1px solid #44
   <div id="akeys">
     <input id="ak" placeholder="Alpaca Key ID" autocomplete="off" spellcheck="false">
     <input id="as" type="password" placeholder="Alpaca Secret Key" autocomplete="off">
-    <div class="note">程式已內建金鑰；在這裡改寫會覆蓋內建值，清空則回到內建值。金鑰只會直接送到 Alpaca，不經過任何代理。免費帳號用 IEX 資料，成交量只涵蓋部分市場，會和 Yahoo 不同。金鑰請到 Alpaca 後台申請（Paper 帳號即可）。</div>
+    <div class="note">程式已內建金鑰；在這裡改寫會覆蓋內建值，清空則回到內建值。金鑰只會直接送到 Alpaca，不經過任何代理。免費帳號的即時資料只有 IEX 一家交易所；程式會用 15 分鐘前的全市場 SIP 資料補齊盤前盤後與成交量，最近 15 分鐘則用 IEX 即時資料。金鑰請到 Alpaca 後台申請（Paper 帳號即可）。</div>
   </div>
   <div class="sec">台股來源</div>
   <div class="seg" data-k="src_tw"><button data-v="yahoo">Yahoo</button><button data-v="mis">證交所 MIS</button></div>
@@ -301,23 +301,37 @@ function etTs(date,h,mi){
   const loc=Date.UTC(+o.year,+o.month-1,+o.day,+o.hour,+o.minute);
   return(g-(loc-g))/1000;
 }
+// 免費方案：IEX 即時但盤前盤後幾乎沒成交；SIP 涵蓋全市場與完整盤前盤後，但只能查 15 分鐘以前的資料。
+// 因此：15 分鐘以前用 SIP，最近 15 分鐘用 IEX 補上，最新價取兩者中較新的那一筆。
 async function fetchQA(s){
   try{
-    const start=new Date(Date.now()-5*864e5).toISOString();
-    const[bj,sn]=await Promise.all([aGet(`/v2/stocks/${s}/bars?timeframe=5Min&start=${start}&limit=1000&feed=iex`),snaps()]);
-    const all=(bj.bars||[]).map(b=>({t:Date.parse(b.t)/1000,h:b.h,l:b.l,c:b.c,v:b.v||0}));
-    const x=(sn.snapshots||sn)[s],lt=x&&x.latestTrade;
-    if(!lt&&!all.length)return null;
-    const ref=lt?Date.parse(lt.t)/1000:all[all.length-1].t,date=etDate(ref);
+    const now=Date.now()/1000,iso=t=>new Date(t*1000).toISOString(),start=iso(now-5*86400),cut=iso(now-16*60);
+    const map=b=>({t:Date.parse(b.t)/1000,h:b.h,l:b.l,c:b.c,v:b.v||0});
+    const[sj,ij,sn]=await Promise.all([
+      aGet(`/v2/stocks/${s}/bars?timeframe=5Min&start=${start}&end=${cut}&limit=1000&sort=desc&feed=sip`).catch(()=>null),
+      aGet(`/v2/stocks/${s}/bars?timeframe=5Min&start=${start}&limit=1000&sort=desc&feed=iex`),
+      snaps()]);
+    const sip=((sj&&sj.bars)||[]).map(map).reverse(),iex=(ij.bars||[]).map(map).reverse();
+    const sipEnd=sip.length?sip[sip.length-1].t:-1,all=sip.concat(iex.filter(b=>b.t>sipEnd));
+    const x=(sn.snapshots||sn)[s],lt=x&&x.latestTrade,ltT=lt?Date.parse(lt.t)/1000:-1;
+    const lastBar=all[all.length-1];
+    if(!lastBar&&!lt)return null;
+    const useLt=lt&&(!lastBar||ltT>=lastBar.t);
+    const ref=useLt?ltT:lastBar.t,price=useLt?lt.p:lastBar.c,date=etDate(ref);
     const day=all.filter(b=>etDate(b.t)===date);
     const reg0=etTs(date,9,30),reg1=etTs(date,16,0),pre0=etTs(date,4,0),post1=etTs(date,20,0);
     const rb=day.filter(b=>b.t>=reg0&&b.t<reg1),hb=rb.length?rb:day;
-    const price=lt?lt.p:day[day.length-1].c;
     const t=day.map(b=>b.t),c=day.map(b=>b.c);
     if(!t.length||ref>t[t.length-1]){t.push(ref);c.push(price)}
-    const prev=(x&&x.prevDailyBar&&x.prevDailyBar.c)||c[0],now=Date.now()/1000;
-    const ses=now-ref>1200?"休市":ref<reg0?"盤前":ref<reg1?"盤中":"盤後";
-    return{price,prev,hi:hb.length?Math.max(...hb.map(b=>b.h)):price,lo:hb.length?Math.min(...hb.map(b=>b.l)):price,vol:hb.reduce((a,b)=>a+b.v,0),t,c,pre0,reg0,reg1,post1,ses,name:""};
+    // 昨收優先用 SIP 日K（官方收盤），沒有才用 IEX 快照
+    const dk=dcache[s]&&dcache[s].d&&dcache[s].d.bars.filter(b=>etDate(b.t)<date);
+    const prev=(dk&&dk.length&&dk[dk.length-1].c)||(x&&x.prevDailyBar&&x.prevDailyBar.c)||c[0];
+    // 時段依時鐘判斷（SIP 有 15 分鐘延遲，不能用最後一筆的時間判斷是否休市）
+    const live=now>=pre0&&now<=post1&&now-ref<3600;
+    const ses=!live?"休市":now<reg0?"盤前":now<reg1?"盤中":"盤後";
+    let hi=hb.length?Math.max(...hb.map(b=>b.h)):price,lo=hb.length?Math.min(...hb.map(b=>b.l)):price;
+    if(ses==="盤中"){hi=Math.max(hi,price);lo=Math.min(lo,price)}
+    return{price,prev,hi,lo,vol:hb.reduce((a,b)=>a+b.v,0),t,c,pre0,reg0,reg1,post1,ses,name:""};
   }catch(e){srcErr=e.message==="nokey"?"請先到 ⚙ 設定 Alpaca 金鑰":"Alpaca 連線失敗（金鑰錯誤或被 CORS 擋住）";return null}
 }
 async function fetchDA(s){
