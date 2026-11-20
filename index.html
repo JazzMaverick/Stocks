@@ -26,6 +26,7 @@ button{background:none;border:0;color:var(--ext);font-size:14px;padding:6px 4px}
 .px{font-size:20px;font-weight:700;line-height:1.15}
 .chg{font-size:12px}
 canvas{flex:1;min-height:0;width:100%;margin:3px 0}
+.ma{font-size:9px;white-space:nowrap;overflow:hidden;line-height:1.3}
 .info{font-size:10px;color:var(--gray);white-space:nowrap;overflow:hidden}
 .up{color:var(--up)}.down{color:var(--down)}.ext{color:var(--ext)}.gray{color:var(--gray)}
 dialog{background:#111;color:#fff;border:1px solid #333;border-radius:12px;width:min(92vw,420px);padding:16px}
@@ -67,7 +68,9 @@ textarea{width:100%;height:260px;background:#000;color:#fff;border:1px solid #44
 .tabs .sp{flex:1}
 #legend{font-size:11px;color:#bbb;line-height:1.5;min-height:34px}
 #legend span{margin-right:8px;white-space:nowrap}
-#fcv{flex:1;min-height:0;width:100%;touch-action:none}
+#cbox{flex:1;min-height:0;position:relative}
+#cbox canvas{position:absolute;inset:0;width:100%;height:100%;margin:0;touch-action:none}
+#gov{pointer-events:none}
 </style>
 </head>
 <body>
@@ -80,11 +83,11 @@ textarea{width:100%;height:260px;background:#000;color:#fff;border:1px solid #44
   <div class="fh"><span id="fsym" class="sym"></span><span id="fses" class="ses"></span><button id="fsx">✕</button></div>
   <div><span id="fpx" class="px"></span><span id="fchg" class="chg"></span></div>
   <div class="tabs">
-    <button data-mode="intra">分時</button><button data-mode="day">日K＋均線</button><span class="sp"></span>
+    <button data-mode="g3d">立體</button><button data-mode="intra">分時</button><button data-mode="day">日K＋均線</button><span class="sp"></span>
     <button data-n="60">3月</button><button data-n="120">6月</button><button data-n="250">1年</button>
   </div>
   <div id="legend"></div>
-  <canvas id="fcv"></canvas>
+  <div id="cbox"><canvas id="fcv"></canvas><canvas id="gcv" hidden></canvas><canvas id="gov" hidden></canvas></div>
 </div>
 <div id="st" hidden>
   <div class="eh"><span>資料來源設定</span><span style="flex:1"></span><button id="stok">完成</button></div>
@@ -98,7 +101,7 @@ textarea{width:100%;height:260px;background:#000;color:#fff;border:1px solid #44
   <div id="akeys">
     <input id="ak" placeholder="Alpaca Key ID" autocomplete="off" spellcheck="false">
     <input id="as" type="password" placeholder="Alpaca Secret Key" autocomplete="off">
-    <div class="note">金鑰只存在這支手機的瀏覽器，只會直接送到 Alpaca，不經過任何代理。免費帳號用 IEX 資料，成交量只涵蓋部分市場，會和 Yahoo 不同。金鑰請到 Alpaca 後台申請（Paper 帳號即可）。</div>
+    <div class="note">程式已內建金鑰；在這裡改寫會覆蓋內建值，清空則回到內建值。金鑰只會直接送到 Alpaca，不經過任何代理。免費帳號用 IEX 資料，成交量只涵蓋部分市場，會和 Yahoo 不同。金鑰請到 Alpaca 後台申請（Paper 帳號即可）。</div>
   </div>
   <div class="sec">台股來源</div>
   <div class="seg" data-k="src_tw"><button data-v="yahoo">Yahoo</button><button data-v="mis">證交所 MIS</button></div>
@@ -136,7 +139,7 @@ function build(){
     const pg=document.createElement("div");pg.className="page";
     syms.slice(p*6,p*6+6).forEach(s=>{
       const c=document.createElement("div");c.className="cell";
-      c.innerHTML=`<div class="top"><span class="sym">${disp(s)}</span><span class="ses gray">載入中…</span><span class="nm">${isTW(s)?(NAMES[disp(s)]||""):""}</span></div><div class="px">--</div><div class="chg">&nbsp;</div><canvas></canvas><div class="info">&nbsp;</div>`;
+      c.innerHTML=`<div class="top"><span class="sym">${disp(s)}</span><span class="ses gray">載入中…</span><span class="nm">${isTW(s)?(NAMES[disp(s)]||""):""}</span></div><div class="px">--</div><div class="chg">&nbsp;</div><canvas></canvas><div class="ma">&nbsp;</div><div class="info">&nbsp;</div>`;
       c.onclick=()=>openFS(s);
       pg.appendChild(c);cells[s]=c;
       if(quotes[s])render(s);
@@ -190,22 +193,61 @@ function render(s){
   const ch=cell.querySelector(".chg");ch.textContent=`${sg}${chg.toFixed(2)}  ${sg}${pct.toFixed(2)}%`;ch.className="chg "+cls;
   cell.querySelector(".info").textContent=`高 ${q.hi.toFixed(2)}  低 ${q.lo.toFixed(2)}  量 ${volTxt(s,q.vol)}`;
   if(isTW(s))cell.querySelector(".nm").textContent=NAMES[disp(s)]||q.name||"";
-  draw(cell.querySelector("canvas"),q,css(chg>=0?"--up":"--down"));
+  cell.querySelector(".ma").innerHTML=maHTML(s,q);
+  draw(cell.querySelector("canvas"),q,css(chg>=0?"--up":"--down"),s);
 }
 
-function draw(cv,q,col){
+// 均線（以分時資料逐筆計算）：5MA / 10MA / 20MA
+const MA3=[[5,"#ffffff"],[10,"#ffd54f"],[20,"#4fc3f7"]];
+// 日線 5 日 / 10 日 / 20 日均線：盤中用「過去收盤 + 目前價」，其他時段用已收盤的日K
+const dayF={};
+const dayOf=(ts,tz)=>(dayF[tz]||(dayF[tz]=new Intl.DateTimeFormat("en-CA",{timeZone:tz,year:"numeric",month:"2-digit",day:"2-digit"}))).format(ts*1000);
+function dailyMA(s,q){
+  const c=dcache[s];if(!c||!c.d||!c.d.bars.length||!q)return null;
+  const tz=tzOf(s),qd=dayOf(q.t[q.t.length-1],tz),B=c.d.bars;
+  const cl=q.ses==="盤中"?[...B.filter(b=>dayOf(b.t,tz)<qd).map(b=>b.c),q.price]:B.filter(b=>dayOf(b.t,tz)<=qd).map(b=>b.c);
+  const o={};MA3.forEach(([n])=>{o[n]=cl.length>=n?cl.slice(-n).reduce((a,b)=>a+b,0)/n:null});return o;
+}
+function maHTML(s,q){const m=dailyMA(s,q);return MA3.map(([n,c])=>`<span style="color:${c}">${n}日 ${m&&m[n]!=null?m[n].toFixed(2):"--"}</span>`).join(" ")}
+// 背景補抓日K（5 分鐘快取；失敗則 60 秒後再試）
+const dpend={},dfail={};
+function ensureD(s){
+  const c=dcache[s];
+  if((c&&Date.now()-c.at<300000)||dpend[s]||Date.now()-(dfail[s]||0)<60000)return;
+  dpend[s]=fetchD(s).then(d=>{if(!d)dfail[s]=Date.now();render(s);if(fsSym===s&&fsMode==="intra")renderFS()}).finally(()=>{delete dpend[s]});
+}
+
+// 分時線圖：橫軸時間、縱軸價格、昨收虛線、三條均線
+function draw(cv,q,col,s,big){
   const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;
   if(!w||!h)return;
   cv.width=w*dpr;cv.height=h*dpr;
   const g=cv.getContext("2d");g.scale(dpr,dpr);
+  const fs=big?11:9,tz=tzOf(s||"");g.font=fs+"px sans-serif";
   const span=Math.max(1,q.post1-q.pre0);
-  const mn=Math.min(...q.c,q.prev),mx=Math.max(...q.c,q.prev),rg=Math.max(1e-4,mx-mn);
-  const X=t=>(t-q.pre0)/span*w,Y=v=>h-(v-mn)/rg*h*0.96-h*0.02;
-  g.lineWidth=1;g.strokeStyle="#2a2a2a";
-  [q.reg0,q.reg1].forEach(t=>{g.beginPath();g.moveTo(X(t),0);g.lineTo(X(t),h);g.stroke()});
+  const dm=dailyMA(s,q),mv=dm?Object.values(dm).filter(v=>v!=null):[];
+  const mn=Math.min(...q.c,q.prev,...mv),mx=Math.max(...q.c,q.prev,...mv),rg=Math.max(1e-4,mx-mn);
+  const pt=niceTicks(mn,mx,big?5:2),labs=pt.ticks.filter(v=>v>=mn-rg*0.02&&v<=mx+rg*0.02).map(v=>[v,v.toFixed(pt.dec)]);
+  const R=Math.ceil(Math.max(0,...labs.map(l=>g.measureText(l[1]).width)))+5,B=fs+4,pw=w-R,ph=h-B;
+  const X=t=>Math.max(0,Math.min(1,(t-q.pre0)/span))*pw,Y=v=>ph-(v-mn)/rg*ph*0.94-ph*0.03;
+  g.lineWidth=1;
+  // 縱軸：價格刻度
+  labs.forEach(([v,txt])=>{const y=Y(v);g.strokeStyle="#1c1c1c";g.beginPath();g.moveTo(0,y);g.lineTo(pw,y);g.stroke();
+    g.fillStyle="#777";g.textAlign="left";g.fillText(txt,pw+3,Math.max(fs,Math.min(ph,y+fs*0.35)))});
+  // 橫軸：時間刻度
+  const tt=timeTicks(q.pre0,q.post1,big?Math.max(3,Math.floor(pw/60)):3);
+  tt.forEach((t,i)=>{const x=X(t);g.strokeStyle="#1c1c1c";g.beginPath();g.moveTo(x,0);g.lineTo(x,ph);g.stroke();
+    g.fillStyle="#777";g.textAlign=i===0?"left":i===tt.length-1&&x>pw-20?"right":"center";g.fillText(fmtT(t,tz),x,h-2)});
+  g.strokeStyle="#333";g.beginPath();g.moveTo(0,ph);g.lineTo(pw,ph);g.moveTo(pw,0);g.lineTo(pw,ph);g.stroke();
+  g.strokeStyle="#2a2a2a";
+  [q.reg0,q.reg1].forEach(t=>{if(t>q.pre0&&t<q.post1){g.beginPath();g.moveTo(X(t),0);g.lineTo(X(t),ph);g.stroke()}});
   g.strokeStyle="#8a8a8a";g.setLineDash([5,5]);
-  g.beginPath();g.moveTo(0,Y(q.prev));g.lineTo(w,Y(q.prev));g.stroke();g.setLineDash([]);
-  g.lineWidth=2;g.lineJoin="round";
+  g.beginPath();g.moveTo(0,Y(q.prev));g.lineTo(pw,Y(q.prev));g.stroke();g.setLineDash([]);
+  // 日線 5 日 / 10 日 / 20 日均線價位（橫線＋右側色標）
+  if(dm){g.lineWidth=1;MA3.forEach(([n,c])=>{const v=dm[n];if(v==null)return;const y=Y(v);
+    g.strokeStyle=c;g.globalAlpha=0.9;g.beginPath();g.moveTo(0,y);g.lineTo(pw,y);g.stroke();g.globalAlpha=1;
+    g.fillStyle=c;g.fillRect(pw,y-0.75,4,1.5)})}
+  g.lineWidth=big?2:1.6;g.lineJoin="round";g.beginPath();
   let curExt=null;
   for(let i=1;i<q.c.length;i++){
     const ext=!(q.t[i]>=q.reg0&&q.t[i]<=q.reg1);
@@ -221,7 +263,10 @@ let srcErr="",snapP=null,snapAt=0,misP=null,misAt=0,tk={};
 try{tk=JSON.parse(localStorage.getItem("tk")||"{}")}catch(e){}
 const lsGet=k=>{try{return localStorage.getItem(k)||""}catch(e){return ""}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
-const SRC=()=>({us:lsGet("src_us")==="alpaca"?"alpaca":"yahoo",tw:lsGet("src_tw")==="mis"?"mis":"yahoo"});
+// 內建 Alpaca 金鑰（設定畫面可另外輸入覆蓋；清空則回到內建值）
+const ALP_K="PKVYTVQ46P3X3YX5OULMSYBOOQ",ALP_S="4V6SaTjHAd1Gw6a2mzxvURqjVuvYTUr7trPQcFmE6LSW";
+const alpK=()=>lsGet("alp_k")||ALP_K,alpS=()=>lsGet("alp_s")||ALP_S;
+const SRC=()=>({us:lsGet("src_us")==="yahoo"?"yahoo":"alpaca",tw:lsGet("src_tw")==="mis"?"mis":"yahoo"});
 const srcLabel=()=>{const S=SRC();return mkt==="tw"?(S.tw==="mis"?"MIS":"Yahoo"):(S.us==="alpaca"?"Alpaca":"Yahoo")};
 function saveTk(){try{localStorage.setItem("tk",JSON.stringify(tk))}catch(e){}}
 
@@ -237,7 +282,7 @@ async function fetchD(s){
 
 // --- Alpaca（金鑰只直連 data.alpaca.markets，不走代理）---
 async function aGet(path){
-  const k=lsGet("alp_k"),sec=lsGet("alp_s");
+  const k=alpK(),sec=alpS();
   if(!k||!sec)throw new Error("nokey");
   const ac=new AbortController(),tm=setTimeout(()=>ac.abort(),6000);let r;
   try{r=await fetch("https://data.alpaca.markets"+path,{headers:{"APCA-API-KEY-ID":k,"APCA-API-SECRET-KEY":sec},signal:ac.signal})}finally{clearTimeout(tm)}
@@ -328,7 +373,7 @@ async function setWake(on){
     else if(wl){await wl.release();wl=null}
   }catch(e){}
 }
-function curVal(k){const v=lsGet(k);return k==="src_us"?SRC().us:k==="src_tw"?SRC().tw:k==="rf"?(v||"5"):(v||"0")}
+function curVal(k){const v=lsGet(k);return k==="src_us"?SRC().us:k==="src_tw"?SRC().tw:k==="rf"?(v||"15"):(v||"0")}
 function paintSettings(){
   document.querySelectorAll("#st .seg").forEach(g=>{
     const cur=curVal(g.dataset.k);
@@ -339,7 +384,7 @@ function paintSettings(){
 document.querySelectorAll("#st .seg button").forEach(b=>b.onclick=()=>{lsSet(b.parentNode.dataset.k,b.dataset.v);if(b.parentNode.dataset.k==="wake")setWake(b.dataset.v==="1");paintSettings()});
 $("ak").oninput=e=>lsSet("alp_k",e.target.value.trim());
 $("as").oninput=e=>lsSet("alp_s",e.target.value.trim());
-$("cfg").onclick=()=>{$("ak").value=lsGet("alp_k");$("as").value=lsGet("alp_s");paintSettings();$("st").hidden=false};
+$("cfg").onclick=()=>{$("ak").value=alpK();$("as").value=alpS();paintSettings();$("st").hidden=false};
 $("stok").onclick=()=>{
   $("st").hidden=true;
   Object.keys(quotes).forEach(k=>delete quotes[k]);
@@ -355,7 +400,7 @@ async function pull(list){
   let ok=0;
   await Promise.all(list.map(async s=>{
     const q=await fetchQ(s);
-    if(q){quotes[s]=q;ok++;render(s)}
+    if(q){quotes[s]=q;ok++;render(s);ensureD(s)}
     else if(!quotes[s]&&cells[s]){cells[s].querySelector(".ses").textContent="無資料"}
   }));
   return ok;
@@ -382,14 +427,14 @@ $("pager").addEventListener("scroll",()=>{
   clearTimeout(pgT);
   pgT=setTimeout(()=>{const p=curPage();if(p!==lastPg){lastPg=p;refresh()}},120);
 },{passive:true});
-const refreshMs=()=>(+lsGet("rf")||5)*1000;
+const refreshMs=()=>(+lsGet("rf")||15)*1000;
 function start(){clearInterval(timer);cyc=0;refresh();timer=setInterval(()=>{if(!document.hidden)refresh()},refreshMs())}
 document.addEventListener("visibilitychange",()=>{if(!document.hidden){cyc=0;refresh();if(lsGet("wake")==="1"&&!wl)setWake(true)}});
 window.addEventListener("resize",()=>{syms.forEach(render);if(fsSym)renderFS()});
 
 const MAS=[[5,"#ffffff"],[10,"#ffd54f"],[20,"#4fc3f7"],[60,"#ba68c8"],[120,"#ff8a65"],[200,"#81c784"]];
 const dcache={};
-let fsSym=null,fsMode="intra",fsN=120,fsIdx=null;
+let fsSym=null,fsMode=["g3d","intra","day"].includes(lsGet("fsMode"))?lsGet("fsMode"):"g3d",fsN=120,fsIdx=null;
 
 async function fetchDY(s){
   const c=dcache[s];if(c&&Date.now()-c.at<300000)return c.d;
@@ -452,9 +497,12 @@ async function renderFS(){
   document.querySelectorAll("#fs [data-mode]").forEach(b=>b.classList.toggle("on",b.dataset.mode===fsMode));
   document.querySelectorAll("#fs [data-n]").forEach(b=>{b.classList.toggle("on",+b.dataset.n===fsN);b.style.display=fsMode==="day"?"":"none"});
   const cv=$("fcv"),lg=$("legend");
+  const useGPU=fsMode==="g3d"&&!g3.fail;
+  $("gcv").hidden=$("gov").hidden=!useGPU;cv.hidden=useGPU;
+  if(fsMode==="g3d"){g3show(s,q);return}
   if(fsMode==="intra"){
     lg.innerHTML=q?`<span>高 ${q.hi.toFixed(2)}</span><span>低 ${q.lo.toFixed(2)}</span><span>量 ${volTxt(s,q.vol)}</span><span>昨收 ${q.prev.toFixed(2)}</span>`:"";
-    if(q)draw(cv,q,css(q.price>=q.prev?"--up":"--down"));
+    if(q){lg.innerHTML+="<br>"+maHTML(s,q);draw(cv,q,css(q.price>=q.prev?"--up":"--down"),s,true)}
     return;
   }
   if(!dcache[s])lg.textContent="載入日K…";
@@ -468,14 +516,14 @@ async function renderFS(){
 }
 
 function openFS(s){
-  fsSym=s;fsIdx=null;$("fs").hidden=false;
+  fsSym=s;fsIdx=null;g3.sym=null;$("fs").hidden=false;
   try{history.pushState({fs:1},"")}catch(e){}
   renderFS();
 }
 function closeFS(){fsSym=null;$("fs").hidden=true}
 window.addEventListener("popstate",()=>{if(fsSym)closeFS()});
 $("fsx").onclick=()=>{if(history.state&&history.state.fs)history.back();else closeFS()};
-document.querySelectorAll("#fs [data-mode]").forEach(b=>b.onclick=()=>{fsMode=b.dataset.mode;fsIdx=null;renderFS()});
+document.querySelectorAll("#fs [data-mode]").forEach(b=>b.onclick=()=>{fsMode=b.dataset.mode;lsSet("fsMode",fsMode);fsIdx=null;if(fsMode==="g3d")g3.reveal=performance.now();renderFS()});
 document.querySelectorAll("#fs [data-n]").forEach(b=>b.onclick=()=>{fsN=+b.dataset.n;fsIdx=null;renderFS()});
 function pickBar(e){
   if(fsMode!=="day"||!dcache[fsSym])return;
@@ -485,7 +533,300 @@ function pickBar(e){
 }
 $("fcv").addEventListener("pointerdown",pickBar);
 $("fcv").addEventListener("pointermove",e=>{if(e.buttons)pickBar(e)});
-$("legend").onclick=()=>{fsIdx=null;renderFS()};
+$("legend").onclick=()=>{fsIdx=null;g3.selT=null;renderFS()};
+
+// ===== 座標軸刻度工具（橫軸時間、縱軸價位）=====
+function niceTicks(mn,mx,n){
+  const raw=(mx-mn)/n||1,mag=Math.pow(10,Math.floor(Math.log10(raw))),r=raw/mag;
+  const step=(r<1.5?1:r<3?2:r<7?5:10)*mag,out=[];
+  for(let v=Math.ceil(mn/step)*step;v<=mx+1e-9;v+=step)out.push(+v.toFixed(10));
+  return{ticks:out,dec:step>=1?0:step>=0.1?1:step>=0.01?2:3};
+}
+function timeTicks(a,b,maxN){
+  const mins=(b-a)/60,st=[5,10,15,30,60,120,180,240].find(m=>mins/m<=maxN)||480,out=[];
+  for(let t=a;t<=b+1;t+=st*60)out.push(t);
+  return out;
+}
+const tfC={};
+const fmtT=(ts,tz)=>(tfC[tz]||(tfC[tz]=new Intl.DateTimeFormat("zh-TW",{timeZone:tz,hour:"2-digit",minute:"2-digit",hourCycle:"h23"}))).format(ts*1000);
+const tzOf=s=>isTW(s)?"Asia/Taipei":"America/New_York";
+
+// 不支援 WebGPU 時的平面備援圖（同樣有時間軸與價位軸）
+function drawAxes2D(cv,q,s){
+  const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w||!h)return;
+  cv.width=w*dpr;cv.height=h*dpr;const g=cv.getContext("2d");g.scale(dpr,dpr);
+  const L=4,R=52,T=8,B=22,pw=w-L-R,ph=h-T-B,span=Math.max(1,q.post1-q.pre0),tz=tzOf(s);
+  let mn=Math.min(...q.c,q.prev),mx=Math.max(...q.c,q.prev);const pd=(mx-mn)*0.08||mx*0.002||1;mn-=pd;mx+=pd;
+  const X=t=>L+Math.max(0,Math.min(1,(t-q.pre0)/span))*pw,Y=v=>T+ph-(v-mn)/(mx-mn)*ph;
+  g.font="10px sans-serif";g.lineWidth=1;
+  const pt=niceTicks(mn,mx,5);
+  pt.ticks.forEach(v=>{g.strokeStyle="#1e1e1e";g.beginPath();g.moveTo(L,Y(v));g.lineTo(L+pw,Y(v));g.stroke();g.fillStyle="#888";g.textAlign="left";g.fillText(v.toFixed(pt.dec),L+pw+4,Y(v)+3)});
+  g.textAlign="center";
+  timeTicks(q.pre0,q.post1,Math.max(3,Math.floor(pw/60))).forEach(t=>{g.strokeStyle="#1e1e1e";g.beginPath();g.moveTo(X(t),T);g.lineTo(X(t),T+ph);g.stroke();g.fillStyle="#888";g.fillText(fmtT(t,tz),Math.max(L+16,Math.min(L+pw-16,X(t))),h-6)});
+  g.strokeStyle="#555";g.setLineDash([5,5]);g.beginPath();g.moveTo(L,Y(q.prev));g.lineTo(L+pw,Y(q.prev));g.stroke();g.setLineDash([]);
+  const col=css(q.price>=q.prev?"--up":"--down");g.lineWidth=2;g.beginPath();let cur=null;
+  for(let i=1;i<q.c.length;i++){
+    const ext=!(q.t[i]>=q.reg0&&q.t[i]<=q.reg1);
+    if(ext!==cur){g.stroke();g.beginPath();g.strokeStyle=ext?css("--ext"):col;g.moveTo(X(q.t[i-1]),Y(q.c[i-1]));cur=ext}
+    g.lineTo(X(q.t[i]),Y(q.c[i]));
+  }
+  g.stroke();
+}
+
+// ===== WebGPU 立體走勢圖 =====
+const YAW0=0.42,PITCH0=0.30;
+const g3={yaw:YAW0,pitch:PITCH0,tyaw:YAW0,tpitch:PITCH0,zoom:1,idle:0,selT:null,dirty:true,reveal:0,flashT:-1e9,bufs:{},cnt:{},raf:0,lastF:0,lastTap:0};
+const WGSL=`
+struct U{mvp:mat4x4<f32>,p:vec4<f32>};
+@group(0) @binding(0) var<uniform> u:U;
+struct VO{@builtin(position) pos:vec4<f32>,@location(0) col:vec4<f32>,@location(1) wx:f32,@location(2) f:f32};
+@vertex fn vs(@location(0) p:vec3<f32>,@location(1) c:vec4<f32>,@location(2) f:f32)->VO{
+  var o:VO;o.pos=u.mvp*vec4<f32>(p,1.0);o.col=c;o.wx=p.x;o.f=f;return o;
+}
+@fragment fn fs(i:VO)->@location(0) vec4<f32>{
+  if(i.f>0.5&&i.wx>u.p.x){discard;}
+  return vec4<f32>(i.col.rgb*i.col.a,i.col.a);
+}`;
+const hex=h=>{h=(h||"#888").trim().replace("#","");if(h.length===3)h=h.replace(/./g,"$&$&");const n=parseInt(h,16);return[(n>>16&255)/255,(n>>8&255)/255,(n&255)/255]};
+const shd=(c,k)=>c.map(x=>Math.min(1,x*k));
+const v3={sub:(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],crs:(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],dot:(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],nrm:a=>{const l=Math.hypot(...a)||1;return[a[0]/l,a[1]/l,a[2]/l]}};
+function m4persp(fy,asp,n,f){const t=1/Math.tan(fy/2),r=1/(n-f);return[t/asp,0,0,0,0,t,0,0,0,0,f*r,-1,0,0,n*f*r,0]}
+function m4look(e,c,up){
+  const z=v3.nrm(v3.sub(e,c)),x=v3.nrm(v3.crs(up,z)),y=v3.crs(z,x);
+  return{m:[x[0],y[0],z[0],0,x[1],y[1],z[1],0,x[2],y[2],z[2],0,-v3.dot(x,e),-v3.dot(y,e),-v3.dot(z,e),1],x,y};
+}
+function m4mul(a,b){const o=new Array(16);for(let c=0;c<4;c++)for(let r=0;r<4;r++){let s=0;for(let k=0;k<4;k++)s+=a[k*4+r]*b[c*4+k];o[c*4+r]=s}return o}
+function GB(){
+  const a=[];
+  const v=(p,c,al,f)=>a.push(p[0],p[1],p[2],c[0],c[1],c[2],al,f);
+  return{a,v,
+    q(p,c,al,f){[0,1,2,0,2,3].forEach(i=>v(p[i],Array.isArray(c[0])?c[i]:c,Array.isArray(al)?al[i]:al,f))},
+    l(p0,p1,c,al,f){v(p0,c,al,f);v(p1,c,al,f)}};
+}
+function octa(G,c,s,rot,col,f){
+  const P=[[0,s*1.3,0],[0,-s*1.3,0]];for(let k=0;k<4;k++)P.push([Math.cos(rot+k*Math.PI/2)*s,0,Math.sin(rot+k*Math.PI/2)*s]);
+  const Ld=v3.nrm([0.4,0.85,0.5]);
+  for(let k=0;k<4;k++){const a=2+k,b=2+(k+1)%4;[[0,b,a],[1,a,b]].forEach(([i,j,m])=>{
+    const p=[P[i],P[j],P[m]].map(o=>[o[0]+c[0],o[1]+c[1],o[2]+c[2]]);
+    const n=v3.nrm(v3.crs(v3.sub(p[1],p[0]),v3.sub(p[2],p[0])));
+    const cc=shd(col,0.5+0.8*Math.abs(v3.dot(n,Ld)));p.forEach(pp=>G.v(pp,cc,1,f));
+  })}
+}
+function ring(G,c,r,w,R,U,col,al){
+  for(let k=0;k<36;k++){
+    const a0=k/36*Math.PI*2,a1=(k+1)/36*Math.PI*2,pt=(a,rr)=>[0,1,2].map(i=>c[i]+(R[i]*Math.cos(a)+U[i]*Math.sin(a))*rr);
+    G.q([pt(a0,r-w),pt(a1,r-w),pt(a1,r+w),pt(a0,r+w)],col,al,1);
+  }
+}
+
+async function g3init(){
+  if(g3.dev)return true;if(g3.fail)return false;
+  if(g3.initP)return g3.initP;
+  g3.initP=(async()=>{
+    try{
+      if(!navigator.gpu)throw 0;
+      const ad=await navigator.gpu.requestAdapter({powerPreference:"high-performance"});if(!ad)throw 0;
+      const dev=await ad.requestDevice();
+      const ctx=g3.ctx||$("gcv").getContext("webgpu"),fmt=navigator.gpu.getPreferredCanvasFormat();
+      ctx.configure({device:dev,format:fmt,alphaMode:"opaque"});
+      const mod=dev.createShaderModule({code:WGSL});
+      const bgl=dev.createBindGroupLayout({entries:[{binding:0,visibility:GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT,buffer:{}}]});
+      const layout=dev.createPipelineLayout({bindGroupLayouts:[bgl]});
+      const buffers=[{arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:"float32x3"},{shaderLocation:1,offset:12,format:"float32x4"},{shaderLocation:2,offset:28,format:"float32"}]}];
+      const bl={srcFactor:"one",dstFactor:"one-minus-src-alpha",operation:"add"};
+      const mk=(topology,dw)=>dev.createRenderPipeline({layout,vertex:{module:mod,entryPoint:"vs",buffers},
+        fragment:{module:mod,entryPoint:"fs",targets:[{format:fmt,blend:{color:bl,alpha:bl}}]},
+        primitive:{topology,cullMode:"none"},depthStencil:{format:"depth24plus",depthWriteEnabled:dw,depthCompare:"less-equal"},multisample:{count:4}});
+      const ubuf=dev.createBuffer({size:80,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+      Object.assign(g3,{dev,ctx,fmt,ubuf,pO:mk("triangle-list",true),pT:mk("triangle-list",false),pL:mk("line-list",false),
+        bg:dev.createBindGroup({layout:bgl,entries:[{binding:0,resource:{buffer:ubuf}}]}),bufs:{},cnt:{},msaa:null,dirty:true});
+      dev.addEventListener("uncapturederror",e=>console.warn("WebGPU:",e.error&&e.error.message));
+      dev.lost.then(info=>{console.warn("WebGPU lost:",info&&info.message);g3.dev=null;g3.initP=null;g3.msaa=null;g3.bufs={};});
+      return true;
+    }catch(e){g3.fail=true;g3.initP=null;return false}
+  })();
+  return g3.initP;
+}
+function g3up(k,arr){
+  const f=new Float32Array(arr);g3.cnt[k]=f.length/8;if(!f.length)return;
+  let b=g3.bufs[k];
+  if(!b||b.size<f.byteLength){if(b)b.destroy();b=g3.bufs[k]=g3.dev.createBuffer({size:Math.ceil(f.byteLength*1.5/4)*4,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST})}
+  g3.dev.queue.writeBuffer(b,0,f);
+}
+
+// 靜態場景：地板、背牆、格線、昨收面、立體價格帶與漸層簾幕
+function g3build(q,asp){
+  const W=3.2,D=0.5,H=Math.min(3.2,Math.max(1.1,1.6/asp)),span=Math.max(1,q.post1-q.pre0);
+  const X=t=>-W/2+Math.max(0,Math.min(1,(t-q.pre0)/span))*W;
+  let mn=Math.min(...q.c,q.prev),mx=Math.max(...q.c,q.prev);const pd=(mx-mn)*0.08||mx*0.002||1;mn-=pd;mx+=pd;
+  const Y=v=>(v-mn)/(mx-mn)*H;
+  const mainC=hex(css(q.price>=q.prev?"--up":"--down")),extC=hex(css("--ext")),gc=[0.55,0.55,0.6];
+  const pts=q.t.map((t,i)=>({t,v:q.c[i],x:X(t),y:Y(q.c[i]),ext:!(t>=q.reg0&&t<=q.reg1)}));
+  const O=GB(),T=GB(),L=GB();
+  O.q([[-W/2,0,-D],[W/2,0,-D],[W/2,0,D],[-W/2,0,D]],[0.05,0.052,0.065],1,0);
+  const wb=[0.032,0.032,0.042],wt=[0.01,0.01,0.016];
+  O.q([[-W/2,0,-D],[W/2,0,-D],[W/2,H,-D],[-W/2,H,-D]],[wb,wb,wt,wt],1,0);
+  [[q.pre0,q.reg0],[q.reg1,q.post1]].forEach(([a,b])=>{if(b>a){const x0=X(a),x1=X(b);
+    T.q([[x0,0.002,-D],[x1,0.002,-D],[x1,0.002,D],[x0,0.002,D]],extC,0.05,0);
+    T.q([[x0,0,-D+0.002],[x1,0,-D+0.002],[x1,H,-D+0.002],[x0,H,-D+0.002]],extC,0.03,0)}});
+  const pt=niceTicks(mn,mx,5);
+  pt.ticks.forEach(v=>L.l([-W/2,Y(v),-D+0.003],[W/2,Y(v),-D+0.003],gc,0.22,0));
+  const tt=timeTicks(q.pre0,q.post1,asp<1?5:8);
+  tt.forEach(t=>{const x=X(t);L.l([x,0.003,-D],[x,0.003,D],gc,0.15,0);L.l([x,0,-D+0.003],[x,H,-D+0.003],gc,0.1,0)});
+  [q.reg0,q.reg1].forEach(t=>{if(t>q.pre0&&t<q.post1){const x=X(t);L.l([x,0.004,-D],[x,0.004,D],extC,0.45,0);L.l([x,0,-D+0.004],[x,H,-D+0.004],extC,0.3,0)}});
+  L.l([-W/2,0,D],[W/2,0,D],gc,0.45,0);L.l([-W/2,0,-D],[-W/2,H,-D],gc,0.35,0);L.l([-W/2,0,-D],[-W/2,0,D],gc,0.35,0);
+  const yp=Y(q.prev);
+  for(let x=-W/2;x<W/2;x+=0.08)L.l([x,yp,-D+0.005],[Math.min(W/2,x+0.045),yp,-D+0.005],[0.8,0.8,0.8],0.6,0);
+  T.q([[-W/2,yp,-D],[W/2,yp,-D],[W/2,yp,D],[-W/2,yp,D]],[0.7,0.7,0.78],0.04,0);
+  const d=0.07,th=0.035;
+  for(let i=1;i<pts.length;i++){
+    const a=pts[i-1],b=pts[i],c=b.ext?extC:mainC;
+    O.q([[a.x,a.y,-d],[b.x,b.y,-d],[b.x,b.y,d],[a.x,a.y,d]],shd(c,1.25),1,1);
+    O.q([[a.x,a.y,d],[b.x,b.y,d],[b.x,b.y-th,d],[a.x,a.y-th,d]],shd(c,0.8),1,1);
+    O.q([[a.x,a.y,-d],[b.x,b.y,-d],[b.x,b.y-th,-d],[a.x,a.y-th,-d]],shd(c,0.45),1,1);
+    T.q([[a.x,a.y-th,0],[b.x,b.y-th,0],[b.x,0,0],[a.x,0,0]],c,[0.4,0.4,0,0],1);
+    T.q([[a.x,a.y,0],[b.x,b.y,0],[b.x,b.y+0.1,0],[a.x,a.y+0.1,0]],c,[0.32,0.32,0,0],1);
+  }
+  g3.sc={W,D,H,X,Y,pts,pt,tt,yp,mainC,extC,tz:tzOf(g3.sym),q,asp};
+  g3up("sO",O.a);g3up("sT",T.a);g3up("sL",L.a);
+}
+
+function g3frame(now){
+  const cv=$("gcv"),ov=$("gov"),dpr=Math.min(2,window.devicePixelRatio||1),cw=cv.clientWidth,ch=cv.clientHeight;
+  if(!cw||!ch)return;
+  const PW=Math.round(cw*dpr),PH=Math.round(ch*dpr),dev=g3.dev;
+  if(cv.width!==PW||cv.height!==PH||!g3.msaa){
+    cv.width=ov.width=PW;cv.height=ov.height=PH;
+    if(g3.msaa){g3.msaa.destroy();g3.depth.destroy()}
+    g3.msaa=dev.createTexture({size:[PW,PH],sampleCount:4,format:g3.fmt,usage:GPUTextureUsage.RENDER_ATTACHMENT});
+    g3.depth=dev.createTexture({size:[PW,PH],sampleCount:4,format:"depth24plus",usage:GPUTextureUsage.RENDER_ATTACHMENT});
+    g3.dirty=true;
+  }
+  const asp=cw/ch;
+  if(g3.q&&(g3.dirty||!g3.sc||Math.abs(g3.sc.asp-asp)>0.01)){g3build(g3.q,asp);g3.dirty=false}
+  const sc=g3.sc,t=now/1000;
+  // 相機：平滑跟隨拖曳，閒置時輕微擺動
+  g3.yaw+=(g3.tyaw-g3.yaw)*0.2;g3.pitch+=(g3.tpitch-g3.pitch)*0.2;
+  const k=Math.max(0,Math.min(1,(now-g3.idle-3000)/2500)),yaw=g3.yaw+Math.sin(t*0.45)*0.13*k,pitch=g3.pitch+Math.sin(t*0.31)*0.04*k;
+  const fy=40*Math.PI/180,tv=Math.tan(fy/2),H=sc?sc.H:1.2,W=sc?sc.W:3.2,D=sc?sc.D:0.5;
+  const dist=(Math.max((W/2+0.42)/(tv*asp),(H/2+0.3)/tv)+D*0.6)*g3.zoom;
+  const tg=[0,H*0.48,0],eye=[tg[0]+dist*Math.sin(yaw)*Math.cos(pitch),tg[1]+dist*Math.sin(pitch),tg[2]+dist*Math.cos(yaw)*Math.cos(pitch)];
+  const V=m4look(eye,tg,[0,1,0]),mvp=m4mul(m4persp(fy,asp,0.1,dist*4+10),V.m);
+  const pr=Math.min(1,(now-g3.reveal)/1000),revealX=-W/2-0.15+(1-Math.pow(1-pr,3))*(W+0.4);
+  dev.queue.writeBuffer(g3.ubuf,0,new Float32Array([...mvp,revealX,t,0,0]));
+  // 動態物件：最新價鑽石、跳動光環、輔助線、選取點
+  const O=GB(),T=GB(),L=GB();
+  const last=sc&&sc.pts[sc.pts.length-1];
+  if(last){
+    const c=last.ext?sc.extC:sc.mainC;
+    octa(O,[last.x,last.y-0.0175,0],0.05*(1+0.2*Math.sin(t*4)),t*1.6,shd(c,1.35),1);
+    ring(T,[last.x,last.y-0.0175,0],0.085+0.012*Math.sin(t*4),0.006,V.x,V.y,c,0.35);
+    L.l([last.x,last.y,0],[last.x,0.004,0],c,0.55,1);
+    L.l([last.x,last.y,-D+0.006],[-W/2,last.y,-D+0.006],c,0.5,1);
+    const age=(now-g3.flashT)/1000;
+    if(age>=0&&age<1.2)ring(T,[last.x,last.y-0.0175,0],0.07+age*0.35,0.016,V.x,V.y,hex(css(g3.flashUp?"--up":"--down")),(1-age/1.2)*0.75);
+  }
+  let sp=null;
+  if(sc&&g3.selT!=null){
+    sp=sc.pts.reduce((b,p)=>Math.abs(p.t-g3.selT)<Math.abs(b.t-g3.selT)?p:b,sc.pts[0]);
+    L.l([sp.x,0.004,0],[sp.x,H,0],[1,1,1],0.5,0);
+    L.l([sp.x,sp.y,-D+0.006],[-W/2,sp.y,-D+0.006],[1,1,1],0.45,0);
+    octa(O,[sp.x,sp.y-0.0175,0],0.032,t*2,[1,1,1],0);
+  }
+  g3up("dO",O.a);g3up("dT",T.a);g3up("dL",L.a);
+  const enc=dev.createCommandEncoder();
+  const pass=enc.beginRenderPass({colorAttachments:[{view:g3.msaa.createView(),resolveTarget:g3.ctx.getCurrentTexture().createView(),clearValue:{r:0,g:0,b:0,a:1},loadOp:"clear",storeOp:"discard"}],
+    depthStencilAttachment:{view:g3.depth.createView(),depthClearValue:1,depthLoadOp:"clear",depthStoreOp:"discard"}});
+  pass.setBindGroup(0,g3.bg);
+  if(sc)[["pO","sO"],["pO","dO"],["pT","sT"],["pT","dT"],["pL","sL"],["pL","dL"]].forEach(([p,b])=>{
+    if(!g3.cnt[b])return;pass.setPipeline(g3[p]);pass.setVertexBuffer(0,g3.bufs[b]);pass.draw(g3.cnt[b]);
+  });
+  pass.end();dev.queue.submit([enc.finish()]);
+  g3.mvp=mvp;g3.cw=cw;g3.ch=ch;
+  g3labels(ov,dpr,cw,ch,mvp,revealX,last,sp);
+}
+function g3proj(m,x,y,z,cw,ch){
+  const X=m[0]*x+m[4]*y+m[8]*z+m[12],Y=m[1]*x+m[5]*y+m[9]*z+m[13],w=m[3]*x+m[7]*y+m[11]*z+m[15];
+  return w<=0?null:[(X/w+1)/2*cw,(1-Y/w)/2*ch];
+}
+function pill(g,x,y,txt,bg,fg,cw){
+  g.font="bold 11px sans-serif";const tw=g.measureText(txt).width+10;
+  if(x+tw>cw-2)x=Math.max(2,x-tw-20);
+  g.fillStyle=bg;g.beginPath();g.roundRect?g.roundRect(x,y-9,tw,18,6):g.rect(x,y-9,tw,18);g.fill();
+  g.fillStyle=fg;g.textAlign="left";g.fillText(txt,x+5,y+4);
+}
+function g3labels(ov,dpr,cw,ch,m,revealX,last,sp){
+  const g=ov.getContext("2d");g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,cw,ch);
+  const sc=g3.sc;
+  if(!sc){g.fillStyle="#888";g.font="13px sans-serif";g.textAlign="center";g.fillText("載入中…",cw/2,ch/2);return}
+  const P=(x,y,z)=>g3proj(m,x,y,z,cw,ch),{W,D,H}=sc;
+  g.font="10px sans-serif";g.fillStyle="#8a8a8a";g.textAlign="right";
+  sc.pt.ticks.forEach(v=>{const p=P(-W/2-0.04,sc.Y(v),-D);if(p)g.fillText(v.toFixed(sc.pt.dec),p[0],p[1]+3)});
+  const pa=P(-W/2-0.04,H,-D);if(pa){g.fillStyle="#bbb";g.fillText("價格",pa[0],Math.max(10,pa[1]-12))}
+  g.textAlign="center";g.fillStyle="#8a8a8a";let lx=-1e9;
+  sc.tt.forEach(t=>{const p=P(sc.X(t),0,D+0.07);if(p&&p[0]-lx>34){g.fillText(fmtT(t,sc.tz),p[0],p[1]+10);lx=p[0]}});
+  g.textAlign="right";g.fillStyle="#bbb";g.fillText((sc.tz==="Asia/Taipei"?"台北":"美東")+"時間 →",cw-4,ch-4);
+  const pp=P(W/2,sc.yp,-D);if(pp){g.fillStyle="#aaa";g.fillText("昨收 "+sc.q.prev.toFixed(2),pp[0],pp[1]-4)}
+  if(last&&revealX>=last.x){const p=P(last.x,last.y+0.02,0);if(p)pill(g,p[0]+14,p[1],last.v.toFixed(2),css(last.ext?"--ext":last.v>=sc.q.prev?"--up":"--down"),"#000",cw)}
+  if(sp){const p=P(sp.x,sp.y+0.12,0);if(p)pill(g,p[0]+10,p[1]-24,fmtT(sp.t,sc.tz)+"  "+sp.v.toFixed(2),"#fff","#000",cw)}
+}
+function g3loop(now){
+  g3.raf=0;
+  if(!fsSym||fsMode!=="g3d"||!g3.dev||$("fs").hidden)return;
+  g3.raf=requestAnimationFrame(g3loop);
+  if(now-g3.lastF<30&&!g3.drag)return;g3.lastF=now;
+  try{g3frame(now)}catch(e){console.error(e)}
+}
+function g3legend(){
+  const q=g3.q,lg=$("legend");if(!q){lg.textContent="載入中…";return}
+  const sc=g3.sc;
+  if(g3.selT!=null&&sc&&sc.pts.length){
+    const p=sc.pts.reduce((b,x)=>Math.abs(x.t-g3.selT)<Math.abs(b.t-g3.selT)?x:b,sc.pts[0]);
+    const c=p.v-q.prev,pc=c/q.prev*100,sg=c>=0?"+":"";
+    lg.innerHTML=`<span>${fmtT(p.t,sc.tz)}</span><span>價 ${p.v.toFixed(2)}</span><span class="${c>=0?"up":"down"}">${sg}${c.toFixed(2)}  ${sg}${pc.toFixed(2)}%</span><span class="gray">${p.ext?"盤前/盤後":"盤中"}</span><br><span class="gray">點這裡回到即時 · 雙擊重設視角</span>`;
+  }else lg.innerHTML=`<span>高 ${q.hi.toFixed(2)}</span><span>低 ${q.lo.toFixed(2)}</span><span>量 ${volTxt(g3.sym,q.vol)}</span><span>昨收 ${q.prev.toFixed(2)}</span><br><span class="gray">拖曳旋轉 · 點圖看該時間價位 · 雙擊重設</span>`;
+}
+async function g3show(s,q){
+  if(g3.sym!==s){Object.assign(g3,{sym:s,selT:null,lastPrice:null,sc:null,q:null,reveal:performance.now(),tyaw:YAW0,tpitch:PITCH0,zoom:1})}
+  if(q&&q!==g3.q){
+    if(g3.lastPrice!=null&&q.price!==g3.lastPrice){g3.flashT=performance.now();g3.flashUp=q.price>g3.lastPrice}
+    g3.lastPrice=q.price;g3.q=q;g3.dirty=true;
+  }
+  g3legend();
+  const ok=await g3init();
+  if(fsSym!==s||fsMode!=="g3d")return;
+  if(!ok){
+    $("gcv").hidden=$("gov").hidden=true;$("fcv").hidden=false;
+    if(q)drawAxes2D($("fcv"),q,s);
+    $("legend").insertAdjacentHTML("afterbegin",'<span class="ext">此瀏覽器不支援 WebGPU，改用平面圖</span><br>');
+    return;
+  }
+  if(!g3.raf)g3.raf=requestAnimationFrame(g3loop);
+}
+// 觸控：拖曳旋轉、點一下選取時間點、雙擊重設、滾輪縮放
+(()=>{
+  const cv=$("gcv");
+  cv.addEventListener("pointerdown",e=>{try{cv.setPointerCapture(e.pointerId)}catch(_){}g3.drag={x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY,moved:false};g3.idle=performance.now()});
+  cv.addEventListener("pointermove",e=>{
+    const d=g3.drag;if(!d)return;
+    if(Math.hypot(e.clientX-d.sx,e.clientY-d.sy)>6)d.moved=true;
+    g3.tyaw=Math.max(-1.1,Math.min(1.1,g3.tyaw-(e.clientX-d.x)*0.005));g3.tpitch=Math.max(0.03,Math.min(1.3,g3.tpitch+(e.clientY-d.y)*0.004));
+    d.x=e.clientX;d.y=e.clientY;g3.idle=performance.now();
+  });
+  const end=e=>{
+    const d=g3.drag;g3.drag=null;if(!d||d.moved||e.type==="pointercancel")return;
+    const now=performance.now();
+    if(now-g3.lastTap<320){g3.lastTap=0;Object.assign(g3,{tyaw:YAW0,tpitch:PITCH0,zoom:1,selT:null,reveal:now});g3legend();return}
+    g3.lastTap=now;
+    const sc=g3.sc;if(!sc||!g3.mvp)return;
+    const r=cv.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top;
+    let best=null,bd=1e9;
+    sc.pts.forEach(p=>{const s=g3proj(g3.mvp,p.x,p.y,0,g3.cw,g3.ch);if(!s)return;const dd=Math.abs(s[0]-px)+0.25*Math.abs(s[1]-py);if(dd<bd){bd=dd;best=p}});
+    g3.selT=best&&bd<80?best.t:null;g3legend();
+  };
+  cv.addEventListener("pointerup",end);cv.addEventListener("pointercancel",end);
+  cv.addEventListener("wheel",e=>{e.preventDefault();g3.zoom=Math.max(0.55,Math.min(1.8,g3.zoom*(e.deltaY>0?1.08:0.93)));g3.idle=performance.now()},{passive:false});
+})();
 
 
 function norm(t){t=t.toUpperCase().trim();return mkt==="tw"&&/^\d{4,6}[A-Z]?$/.test(t)?t+".TW":t}
